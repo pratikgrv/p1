@@ -2,6 +2,7 @@ import { Geist_Mono, Inter, Instrument_Serif } from "next/font/google"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/contexts/auth-context"
 import { cn } from "@/lib/utils"
 import NavBarWrapper from "@/components/nav/nav-bar"
 
@@ -37,7 +38,9 @@ export default function RootLayout({
     >
       <body>
         <ThemeProvider>
-          <NavBarWrapper>{children}</NavBarWrapper>
+          <AuthProvider>
+            <NavBarWrapper>{children}</NavBarWrapper>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
