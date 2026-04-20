@@ -1,12 +1,24 @@
-export type User = {
-  id: string
-  name: string
-  email: string
-}
+import { db } from "../db";
+import * as schema from "../db/schema";
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { siws } from "./auth/siws";
+import { anonymous } from "better-auth/plugins";
 
-// Hardcoded demo user — no real auth needed
-export const DEMO_USER: User = {
-  id: 'demo-user-1',
-  name: 'Manish',
-  email: 'demo@example.com',
-}
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "pg",
+    schema: {
+      ...schema
+    }
+  }),
+  plugins: [
+    anonymous(),
+    siws({
+      domain: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+      statement: "Sign in with your Solana wallet",
+    }),
+  ],
+});
+
+export default auth;

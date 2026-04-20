@@ -2,17 +2,18 @@
 
 import { useChat } from '@ai-sdk/react'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect, useRef } from 'react'
-import { Send, Square, Sparkles, ArrowUp } from 'lucide-react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { Square, Sparkles, ArrowUp } from 'lucide-react'
 import type { UIMessage } from 'ai'
 import { useChatStorage } from '@/hooks/use-chat-storage'
+import { useAuth } from '@/contexts/auth-context'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTitleFromMessages(messages: UIMessage[]): string {
   const firstUser = messages.find((m) => m.role === 'user')
   if (!firstUser) return 'New Chat'
-  const textPart = firstUser.parts?.find((p) => p.type === 'text') as any
+  const textPart = firstUser.parts?.find((p) => p.type === 'text') 
   const text = textPart?.text || 'New Chat'
   return text.length > 40 ? text.slice(0, 40) + '…' : text
 }
@@ -104,22 +105,44 @@ function WelcomeScreen({
 
 interface ChatInterfaceProps {
   chatId?: string // undefined = home / new chat page
+  serverInitialMessages?: UIMessage[]
 }
 
-export function ChatInterface({ chatId }: ChatInterfaceProps) {
+export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfaceProps) {
   const router = useRouter()
   const storage = useChatStorage()
+  const { isAuth, isLoading: authLoading } = useAuth()
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Load existing messages from storage if we have a chatId
-  const initialMessages = chatId ? (storage.getChat(chatId)?.messages ?? []) : []
+  // Synchronous render-time read of sessionStorage to get correct initial state
+  // without any useEffect flash. Also reads the pending message key so we know
+  // if this is a brand-new guest chat (not a broken/invalid URL).
+  const { guestInitialMessages, pendingMessage } = useMemo(() => {
+    if (!chatId || typeof window === 'undefined' || serverInitialMessages?.length) {
+      return { guestInitialMessages: [] as UIMessage[], pendingMessage: null }
+    }
+    const pending = sessionStorage.getItem(`pending_${chatId}`)
+    try {
+      const raw = sessionStorage.getItem('chat_' + chatId)
+      const entry = raw ? (JSON.parse(raw) as { messages: UIMessage[] }) : null
+      return {
+        guestInitialMessages: entry?.messages ?? [],
+        pendingMessage: pending,
+      }
+    } catch {
+      return { guestInitialMessages: [] as UIMessage[], pendingMessage: pending }
+    }
+  }, [chatId]) // excludes serverInitialMessages intentionally — runs once per chatId
+
+  const initialMessages = serverInitialMessages?.length
+    ? serverInitialMessages
+    : guestInitialMessages
 
   const { messages, sendMessage, status, stop } = useChat({
     id: chatId ?? '__home__',
     messages: initialMessages,
-    // After AI responds, persist the full conversation to storage
     onFinish: ({ messages: allMessages }) => {
       if (!chatId) return
       const title = getTitleFromMessages(allMessages)
@@ -127,21 +150,33 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
     },
   })
 
-  // Scroll to latest message as they stream in
+  // Auto-send the pending message for a brand-new guest chat.
+  // Read directly from sessionStorage inside the effect — NOT from the useMemo closure —
+  // so React StrictMode's double-invocation finds it empty on the second run.
+  useEffect(() => {
+    if (!chatId) return
+    const pending = sessionStorage.getItem(`pending_${chatId}`)
+    if (!pending) return
+    sessionStorage.removeItem(`pending_${chatId}`)
+    sendMessage({ text: pending })
+  }, [chatId]) // eslint-disable-line
+
+  // Redirect guests who hit an invalid/expired chatId.
+  // Only fires when we have no pending message and no stored messages — i.e. a truly broken link.
+  // Authenticated users are handled on the server via notFound().
+  useEffect(() => {
+    if (!chatId || authLoading || isAuth || pendingMessage) return
+    const guestChat = storage.getGuestChat(chatId)
+    if (!guestChat && initialMessages.length === 0) {
+      router.replace('/')
+    }
+  }, [chatId, isAuth, authLoading]) // eslint-disable-line
+
+  // Scroll as messages stream in — pure DOM side-effect, useEffect is correct here
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, status])
 
-  // Auto-send pending message (set by home page before navigating here)
-  useEffect(() => {
-    if (!chatId) return
-    const pendingKey = `pending_${chatId}`
-    const pending = sessionStorage.getItem(pendingKey)
-    if (pending) {
-      sessionStorage.removeItem(pendingKey)
-      sendMessage({ text: pending })
-    }
-  }, [chatId]) // only run once when chatId is established
 
   function handleSend() {
     const text = input.trim()
@@ -170,7 +205,11 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
   }
 
   const isStreaming = status === 'streaming' || status === 'submitted'
-  const showWelcome = messages.length === 0
+
+  // Welcome screen shows only on the home page (no chatId).
+  // On a chat page, we always show the messages pane — even if messages are
+  // empty while loading, to avoid suggestion flash on refresh.
+  const showWelcome = !chatId
 
   return (
     <div className="flex h-full flex-col">
@@ -190,7 +229,7 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
       </div>
 
       {/* ── Input bar ── */}
-      <div className="shrink-0 bg-background ">
+      <div className="shrink-0 bg-background">
         <div className="relative mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-3 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20 transition">
           <textarea
             ref={inputRef}
@@ -205,7 +244,7 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
             placeholder="Message…"
             disabled={isStreaming}
             rows={1}
-            className="max-h-40 min-h-8 flex-1 resize-none bg-transparent text-md text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+            className="max-h-40 min-h-7 flex-1 resize-none bg-transparent text-md text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
           />
 
           {isStreaming ? (
@@ -230,7 +269,7 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
           )}
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground/60">
-          {storage.isAuth ? 'Chats are saved to your account.' : 'Guest mode — chats are temporary.'}
+          {isAuth ? 'Chats are saved to your account.' : 'Guest mode — chats are temporary.'}
         </p>
       </div>
     </div>

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { MessageSquare, Trash2, Clock, LogIn } from 'lucide-react'
 import { useChatStorage, type ChatEntry } from '@/hooks/use-chat-storage'
 import { useAuth } from '@/contexts/auth-context'
+import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -22,14 +23,23 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ currentChatId, onNavigate }: ChatSidebarProps) {
-  const { isAuth, signIn } = useAuth()
+  const { isAuth } = useAuth()
+  const { setVisible } = useWalletModal()
   const storage = useChatStorage()
   const [chats, setChats] = useState<ChatEntry[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   // Load chats on mount and whenever auth changes
   useEffect(() => {
-    setChats(storage.getAllChats().sort((a, b) => b.updatedAt - a.updatedAt))
-  }, [isAuth])
+    let active = true;
+    setIsLoading(true);
+    storage.getAllChats().then((data) => {
+      if (!active) return;
+      setChats(data.sort((a, b) => b.updatedAt - a.updatedAt))
+      setIsLoading(false);
+    })
+    return () => { active = false; }
+  }, [isAuth, storage.getAllChats])
 
   function handleDelete(e: React.MouseEvent, id: string) {
     e.preventDefault()
@@ -52,18 +62,32 @@ export function ChatSidebar({ currentChatId, onNavigate }: ChatSidebarProps) {
           </p>
         </div>
         <button
-          onClick={signIn}
+          onClick={() => setVisible(true)}
           className="mt-2 flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
         >
           <LogIn className="h-4 w-4" />
-          Sign in as Demo User
+          Connect Wallet to Save
         </button>
       </div>
     )
   }
 
+  // Logged-in loading state
+  if (isAuth && isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-12 text-center px-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted animate-pulse">
+          <MessageSquare className="h-7 w-7 text-muted-foreground/30" />
+        </div>
+        <div>
+          <p className="font-medium text-foreground">Loading chats...</p>
+        </div>
+      </div>
+    )
+  }
+
   // Logged-in: empty state
-  if (chats.length === 0) {
+  if (isAuth && chats.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-12 text-center px-4">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">

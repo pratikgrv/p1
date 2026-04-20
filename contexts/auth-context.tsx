@@ -1,54 +1,65 @@
-'use client'
+"use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
-import { DEMO_USER, type User } from '@/lib/auth'
+import React, { createContext, useContext, useEffect } from "react";
+import { authClient } from "@/lib/auth-client";
+import { useWalletSignIn } from "@/hooks/use-wallet-sign-in";
 
 interface AuthContextValue {
-  user: User | null
-  isAuth: boolean
-  signIn: () => void
-  signOut: () => void
+  user: { id: string; name: string; email: string; isAnonymous: boolean } | null;
+  isAuth: boolean;
+  isLoading: boolean;
+  signOut: () => Promise<void>;
+  walletStatus: ReturnType<typeof useWalletSignIn>["status"];
+  walletError: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuth: false,
-  signIn: () => {},
-  signOut: () => {},
-})
+  isLoading: true,
+  signOut: async () => {},
+  walletStatus: "idle",
+  walletError: null,
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const { data: session, isPending } = authClient.useSession();
 
-  // Restore auth state from localStorage on page load
+  // The hook manages the wallet sign-in flow; it reads session internally
+  // so no duplicate fetch — authClient caches the session.
+  const { signOut, status: walletStatus, error: walletError } = useWalletSignIn();
+
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('auth_user')
-      if (stored) {
-        setUser(JSON.parse(stored))
-      }
-    } catch {
-      // ignore corrupted storage
+    if (!isPending && !session) {
+      authClient.signIn.anonymous();
     }
-  }, [])
+  }, [isPending, session]);
 
-  function signIn() {
-    setUser(DEMO_USER)
-    localStorage.setItem('auth_user', JSON.stringify(DEMO_USER))
-  }
-
-  function signOut() {
-    setUser(null)
-    localStorage.removeItem('auth_user')
-  }
+  const user = session?.user
+    ? {
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        isAnonymous: session.user.isAnonymous || false,
+      }
+    : null;
 
   return (
-    <AuthContext.Provider value={{ user, isAuth: !!user, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuth: !!user && !user.isAnonymous,
+        isLoading: isPending,
+        signOut,
+        walletStatus,
+        walletError,
+      }}
+    >
       {children}
     </AuthContext.Provider>
-  )
+  );
 }
 
 export function useAuth() {
-  return useContext(AuthContext)
+  return useContext(AuthContext);
 }

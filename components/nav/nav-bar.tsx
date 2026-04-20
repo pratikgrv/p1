@@ -10,10 +10,10 @@ import {
   Globe,
   Plus,
   History,
-  Settings,
-  User,
   LogIn,
   LogOut,
+  Loader2,
+  User,
 } from "lucide-react"
 import {
   Dialog,
@@ -26,11 +26,14 @@ import {
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
+  DrawerTrigger,
 } from "@/components/ui/drawer"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { useAuth } from "@/contexts/auth-context"
 import { ChatSidebar } from "@/components/chat-sidebar"
 import { useParams } from "next/navigation"
+import { useWalletModal } from "@solana/wallet-adapter-react-ui"
+import SignInWrapper from "./sign-in-wrapper"
 
 /* -------------------------------- Types ---------------------------------- */
 export interface NavigationItem {
@@ -45,7 +48,7 @@ export interface NavigationItem {
 /* ------------------------------ Sidebar Styles --------------------------- */
 const styles = {
   sidebar:
-    "hidden lg:flex flex-col items-center w-16 h-screen py-2 bg-sidebar text-sidebar-foreground border-r border-sidebar-border sticky top-0",
+    "hidden lg:flex flex-col items-center w-16 h-screen py-2 bg-sidebar text-sidebar-foreground border-r border-sidebar-border sticky top-0 z-50",
   iconBtn: "w-10 h-10 flex items-center justify-center rounded-lg transition",
   active: "bg-sidebar-accent text-sidebar-accent-foreground",
   inactive:
@@ -53,7 +56,17 @@ const styles = {
 }
 
 /* ------------------------------ Nav Item --------------------------------- */
-function NavItem({ item, isActive }: { item: NavigationItem; isActive: boolean }) {
+function NavItem({
+  item,
+  isActive,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  item: NavigationItem
+  isActive: boolean
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+}) {
   const Icon = item.icon
 
   function handleClick(e: React.MouseEvent) {
@@ -69,6 +82,8 @@ function NavItem({ item, isActive }: { item: NavigationItem; isActive: boolean }
       size="icon"
       variant="ghost"
       className={cn(styles.iconBtn, isActive ? styles.active : styles.inactive)}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <Link href={item.href} onClick={handleClick}>
         <Icon className="size-5" />
@@ -79,34 +94,33 @@ function NavItem({ item, isActive }: { item: NavigationItem; isActive: boolean }
 
 /* ------------------------------ Auth Badge ------------------------------- */
 function AuthBadge() {
-  const { isAuth, user, signIn, signOut } = useAuth()
+  const { isAuth, user, walletStatus, isLoading } = useAuth()
+  const router = useRouter()
 
-  if (isAuth) {
+  if (walletStatus === "signing" || isLoading) {
     return (
-      <div className="flex flex-col items-center gap-1">
-        {/* Avatar circle */}
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-          {user?.name?.[0]?.toUpperCase() ?? "U"}
-        </div>
-        <button
-          onClick={signOut}
-          title="Sign out"
-          className={cn(styles.iconBtn, styles.inactive, "w-8 h-8")}
-        >
-          <LogOut className="size-4" />
-        </button>
+      <div className={cn(styles.iconBtn, styles.inactive)}>
+        <Loader2 className="size-5 animate-spin" />
       </div>
     )
   }
 
   return (
-    <button
-      onClick={signIn}
-      title="Sign in (demo)"
-      className={cn(styles.iconBtn, styles.inactive)}
-    >
-      <LogIn className="size-5" />
-    </button>
+    <SignInWrapper isAuth={isAuth} requiresAuth wrapperClassName="contents">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(styles.iconBtn, styles.inactive)}
+        title="Profile"
+        onClick={() => {
+          if (isAuth) router.push("/profile")
+        }}
+      >
+        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+          {user?.name?.[0]?.toUpperCase() ?? "U"}
+        </div>
+      </Button>
+    </SignInWrapper>
   )
 }
 
@@ -150,37 +164,40 @@ function HistoryPanel({
   )
 }
 
-/* ------------------------------ Mobile Auth ------------------------------ */
-function MobileAuthButton() {
-  const { isAuth, signIn, signOut } = useAuth()
-  if (isAuth) {
-    return (
-      <button
-        onClick={signOut}
-        className="flex flex-1 flex-col items-center text-xs text-sidebar-foreground/70 hover:text-sidebar-accent-foreground transition-colors"
-      >
-        <LogOut className="size-5" />
-        <span className="mt-1">Sign out</span>
-      </button>
-    )
-  }
+/* ------------------------------ Mobile Drawer ------------------------------ */
+function MobileProfileDrawer() {
+  const { isAuth, user } = useAuth()
+  const router = useRouter()
   return (
-    <button
-      onClick={signIn}
-      className="flex flex-1 flex-col items-center text-xs text-sidebar-foreground/70 hover:text-sidebar-accent-foreground transition-colors"
+    <SignInWrapper
+      isAuth={isAuth}
+      requiresAuth
+      wrapperClassName="flex flex-1 flex-col items-center text-xs text-sidebar-foreground/70 hover:text-sidebar-accent-foreground transition-colors"
     >
-      <LogIn className="size-5" />
-      <span className="mt-1">Sign in</span>
-    </button>
+      <button
+        onClick={() => {
+          if (isAuth) router.push("/profile")
+        }}
+        className="flex flex-1 flex-col items-center"
+      >
+        <User className="size-5" />
+        <span className="mt-1">Profile</span>
+      </button>
+    </SignInWrapper>
   )
 }
 
 /* ------------------------------ Main Wrapper ----------------------------- */
-export default function NavbarWrapper({ children }: { children: React.ReactNode }) {
+export default function NavbarWrapper({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const { isAuth } = useAuth()
-  const [historyOpen, setHistoryOpen] = React.useState(false)
+  const [historyHover, setHistoryHover] = React.useState(false)
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
 
   function isActive(href: string) {
     return pathname === href || (href !== "/" && pathname?.startsWith(href))
@@ -198,22 +215,23 @@ export default function NavbarWrapper({ children }: { children: React.ReactNode 
     },
   ]
 
-  const secondaryNav: NavigationItem[] = [
-    {
-      id: "history",
-      label: "History",
-      href: "#",
-      icon: History,
-      fn: () => setHistoryOpen(true),
-    },
-  ]
+  const handleMouseEnterHistory = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    setHistoryHover(true)
+  }
+
+  const handleMouseLeaveHistory = () => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHistoryHover(false)
+    }, 300)
+  }
 
   return (
-    <div className="relative flex h-screen bg-background">
+    <div className="relative flex h-screen overflow-hidden bg-background">
       {/* ──────────── Sidebar (Desktop) ──────────── */}
       <aside className={styles.sidebar}>
         <Link href="/" className="mb-6 flex items-center justify-center pt-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground shadow border">
+          <div className="flex h-8 w-8 items-center justify-center rounded border bg-primary text-xs font-bold text-primary-foreground shadow">
             UM
           </div>
         </Link>
@@ -227,12 +245,50 @@ export default function NavbarWrapper({ children }: { children: React.ReactNode 
 
         {/* Bottom: history + auth */}
         <div className="mt-auto flex flex-col items-center gap-3">
-          {secondaryNav.map((item) => (
-            <NavItem key={item.id} item={item} isActive={false} />
-          ))}
+          {isAuth && (
+            <NavItem
+              item={{
+                id: "history",
+                label: "History",
+                href: "/history",
+                icon: History,
+              }}
+              isActive={isActive("/history")}
+              onMouseEnter={handleMouseEnterHistory}
+              onMouseLeave={handleMouseLeaveHistory}
+            />
+          )}
           <AuthBadge />
         </div>
       </aside>
+
+      {/* ──────────── Secondary Sidebar (Hover) ──────────── */}
+      {isAuth && (
+        <div
+          className={cn(
+            "absolute top-0 left-16 z-40 hidden h-full w-80 border-r border-sidebar-border bg-sidebar shadow-xl transition-transform duration-300 ease-in-out lg:flex",
+            historyHover ? "translate-x-0" : "-translate-x-full"
+          )}
+          onMouseEnter={handleMouseEnterHistory}
+          onMouseLeave={handleMouseLeaveHistory}
+        >
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between border-b border-sidebar-border p-4">
+              <h2 className="text-lg font-semibold">History</h2>
+              <Link
+                href="/history"
+                className="text-xs text-primary hover:underline"
+                onClick={() => setHistoryHover(false)}
+              >
+                View all
+              </Link>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              <ChatSidebar onNavigate={() => setHistoryHover(false)} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ──────────── Main Content ──────────── */}
       <main className="flex flex-1 flex-col overflow-hidden pb-16 lg:pb-0">
@@ -240,44 +296,51 @@ export default function NavbarWrapper({ children }: { children: React.ReactNode 
       </main>
 
       {/* ──────────── Bottom Nav (Mobile) ──────────── */}
-      <nav className="fixed right-0 bottom-0 left-0 border-t border-sidebar-border bg-sidebar lg:hidden">
+      <nav className="fixed right-0 bottom-0 left-0 z-50 border-t border-sidebar-border bg-sidebar lg:hidden">
         <div className="flex justify-around py-2">
-          {[...primaryNav.filter((i) => i.id !== "chat"), ...secondaryNav].map((item) => {
-            const Icon = item.icon
-            const active = isActive(item.href)
+          {primaryNav
+            .filter((i) => i.id !== "chat")
+            .map((item) => {
+              const Icon = item.icon
+              const active = isActive(item.href)
 
-            function handleMobileClick(e: React.MouseEvent) {
-              if (item.fn) {
-                e.preventDefault()
-                item.fn()
-              }
-            }
+              return (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  className={cn(
+                    "flex flex-1 flex-col items-center text-xs transition-colors",
+                    active
+                      ? "text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/70 hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <Icon className="size-5" />
+                  <span className="mt-1">{item.label}</span>
+                </Link>
+              )
+            })}
 
-            return (
-              <Link
-                key={item.id}
-                href={item.href}
-                onClick={handleMobileClick}
-                className={cn(
-                  "flex flex-1 flex-col items-center text-xs transition-colors",
-                  active
-                    ? "text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/70 hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <Icon className="size-5" />
-                <span className="mt-1">{item.label}</span>
-              </Link>
-            )
-          })}
+          {/* Mobile History */}
+          {isAuth && (
+            <Link
+              href="/history"
+              className={cn(
+                "flex flex-1 flex-col items-center text-xs transition-colors",
+                isActive("/history")
+                  ? "text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <History className="size-5" />
+              <span className="mt-1">History</span>
+            </Link>
+          )}
 
-          {/* Mobile sign in/out */}
-          <MobileAuthButton />
+          {/* Mobile Profile Icon with Drawer */}
+          <MobileProfileDrawer />
         </div>
       </nav>
-
-      {/* ──────────── History Panel ──────────── */}
-      <HistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   )
 }
