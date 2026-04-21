@@ -3,10 +3,11 @@
 import { useChat } from '@ai-sdk/react'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Square, Sparkles, ArrowUp } from 'lucide-react'
+import { Square, Sparkles, ArrowUp, Loader2 } from 'lucide-react'
 import type { UIMessage } from 'ai'
 import { useChatStorage } from '@/hooks/use-chat-storage'
 import { useAuth } from '@/contexts/auth-context'
+import { createChatAction } from '@/app/actions/chat'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
   const storage = useChatStorage()
   const { isAuth, isLoading: authLoading } = useAuth()
   const [input, setInput] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -178,7 +180,7 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
   }, [messages, status])
 
 
-  function handleSend() {
+  async function handleSend() {
     const text = input.trim()
     if (!text) return
     if (status !== 'ready' && status !== 'error') return
@@ -186,9 +188,24 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
     setInput('')
 
     if (!chatId) {
-      // Home page: generate a new chat ID, store the message, navigate
+      // Home page: generate a new chat ID, store the pending message, navigate
       const newId = crypto.randomUUID()
+
+      // Always write to sessionStorage — the /chat/[id] page reads this
+      // to auto-send the first message regardless of auth state.
       sessionStorage.setItem(`pending_${newId}`, text)
+
+      if (isAuth) {
+        // Pre-create the DB row so the server page finds it immediately,
+        // preventing the notFound() flash for authenticated users.
+        setIsCreating(true)
+        try {
+          await createChatAction(newId, text)
+        } finally {
+          setIsCreating(false)
+        }
+      }
+
       router.push('/chat/' + newId)
       return
     }
@@ -260,11 +277,13 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
             <button
               type="button"
               onClick={handleSend}
-              disabled={!input.trim()}
+              disabled={!input.trim() || isCreating}
               title="Send message"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <ArrowUp className="h-4 w-4" />
+              {isCreating
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <ArrowUp className="h-4 w-4" />}
             </button>
           )}
         </div>

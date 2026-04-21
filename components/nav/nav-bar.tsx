@@ -111,9 +111,9 @@ function AuthBadge() {
         variant="ghost"
         size="icon"
         className={cn(styles.iconBtn, styles.inactive)}
-        title="Profile"
+        title="Settings"
         onClick={() => {
-          if (isAuth) router.push("/profile")
+          if (isAuth) router.push("/settings")
         }}
       >
         <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -176,12 +176,12 @@ function MobileProfileDrawer() {
     >
       <button
         onClick={() => {
-          if (isAuth) router.push("/profile")
+          if (isAuth) router.push("/settings")
         }}
         className="flex flex-1 flex-col items-center"
       >
         <User className="size-5" />
-        <span className="mt-1">Profile</span>
+        <span className="mt-1">Settings</span>
       </button>
     </SignInWrapper>
   )
