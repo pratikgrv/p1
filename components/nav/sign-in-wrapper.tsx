@@ -1,5 +1,8 @@
 import { useMediaQuery } from "@/hooks/use-media-query"
 import React from "react"
+import { useWalletModal } from "@solana/wallet-adapter-react-ui"
+import { Wallet } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -16,6 +19,27 @@ import {
 /* -----------------------------
    SignIn Wrapper
 ------------------------------ */
+/* -------------------------
+   Wallet Connect Content
+-------------------------- */
+function WalletConnectContent() {
+  const { setVisible } = useWalletModal()
+  return (
+    <div className="flex flex-col items-center gap-4 p-4 pb-6">
+      <p className="text-center text-sm text-foreground/70">
+        Connect your Solana wallet to access this feature.
+      </p>
+      <Button
+        className="w-full gap-2"
+        onClick={() => setVisible(true)}
+      >
+        <Wallet className="size-4" />
+        Connect Wallet
+      </Button>
+    </div>
+  )
+}
+
 const SignInWrapper = ({ children, isAuth, requiresAuth, wrapperClassName = "contents" }: { children: React.ReactNode, isAuth: boolean, requiresAuth?: boolean, wrapperClassName?: string }) => {
   const [open, setOpen] = React.useState(false)
   const isDesktop = useMediaQuery("(min-width: 768px)")
@@ -42,7 +66,7 @@ const SignInWrapper = ({ children, isAuth, requiresAuth, wrapperClassName = "con
              <DialogHeader>
                <DialogTitle>Sign in required</DialogTitle>
              </DialogHeader>
-             <div className="p-4 text-center text-sm text-foreground/70">Please sign in to access this feature.</div>
+             <WalletConnectContent />
            </DialogContent>
         </Dialog>
       )}
@@ -52,7 +76,7 @@ const SignInWrapper = ({ children, isAuth, requiresAuth, wrapperClassName = "con
              <DrawerHeader>
                <DrawerTitle>Sign in required</DrawerTitle>
              </DrawerHeader>
-             <div className="p-4 text-center text-sm text-foreground/70 pb-8">Please sign in to access this feature.</div>
+             <WalletConnectContent />
            </DrawerContent>
         </Drawer>
       )}

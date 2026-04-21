@@ -2,19 +2,18 @@
 
 import { useChat } from '@ai-sdk/react'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect, useRef, useMemo } from 'react'
-import { Square, Sparkles, ArrowUp, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Square, Sparkles, ArrowUp } from 'lucide-react'
 import type { UIMessage } from 'ai'
 import { useChatStorage } from '@/hooks/use-chat-storage'
 import { useAuth } from '@/contexts/auth-context'
-import { createChatAction } from '@/app/actions/chat'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTitleFromMessages(messages: UIMessage[]): string {
   const firstUser = messages.find((m) => m.role === 'user')
   if (!firstUser) return 'New Chat'
-  const textPart = firstUser.parts?.find((p) => p.type === 'text') 
+  const textPart = firstUser.parts?.find((p) => p.type === 'text')
   const text = textPart?.text || 'New Chat'
   return text.length > 40 ? text.slice(0, 40) + '…' : text
 }
@@ -105,112 +104,114 @@ function WelcomeScreen({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 interface ChatInterfaceProps {
-  chatId?: string // undefined = home / new chat page
+  /**
+   * Always provided:
+   *  - Home page  → a fresh UUID generated server-side
+   *  - Chat page  → the [id] URL param
+   */
+  chatId: string
+  /** True only when rendered by the home page (/) */
+  isNewChat?: boolean
+  /** Pre-fetched messages from the server (auth users on /chat/[id]) */
   serverInitialMessages?: UIMessage[]
 }
 
-export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfaceProps) {
+export function ChatInterface({
+  chatId,
+  isNewChat = false,
+  serverInitialMessages,
+}: ChatInterfaceProps) {
   const router = useRouter()
   const storage = useChatStorage()
   const { isAuth, isLoading: authLoading } = useAuth()
   const [input, setInput] = useState('')
-  const [isCreating, setIsCreating] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  /** Tracks previous isAuth value to detect login/logout transitions */
+  const prevIsAuth = useRef<boolean | null>(null)
 
-  // Synchronous render-time read of sessionStorage to get correct initial state
-  // without any useEffect flash. Also reads the pending message key so we know
-  // if this is a brand-new guest chat (not a broken/invalid URL).
-  const { guestInitialMessages, pendingMessage } = useMemo(() => {
-    if (!chatId || typeof window === 'undefined' || serverInitialMessages?.length) {
-      return { guestInitialMessages: [] as UIMessage[], pendingMessage: null }
-    }
-    const pending = sessionStorage.getItem(`pending_${chatId}`)
-    try {
-      const raw = sessionStorage.getItem('chat_' + chatId)
-      const entry = raw ? (JSON.parse(raw) as { messages: UIMessage[] }) : null
-      return {
-        guestInitialMessages: entry?.messages ?? [],
-        pendingMessage: pending,
-      }
-    } catch {
-      return { guestInitialMessages: [] as UIMessage[], pendingMessage: pending }
-    }
-  }, [chatId]) // excludes serverInitialMessages intentionally — runs once per chatId
+  /**
+   * Tracks whether we have already called replaceState to update the URL.
+   * Using a ref so it doesn't trigger re-renders.
+   * - Home page: starts false → set to true after first send
+   * - Chat page: starts true  → replaceState never needed
+   */
+  const hasNavigated = useRef(!isNewChat)
 
-  const initialMessages = serverInitialMessages?.length
-    ? serverInitialMessages
-    : guestInitialMessages
+  /**
+   * Controls the welcome screen vs. messages pane.
+   * Home page starts on WelcomeScreen; hides on first send.
+   */
+  const [showWelcome, setShowWelcome] = useState(
+    isNewChat && !serverInitialMessages?.length,
+  )
 
   const { messages, sendMessage, status, stop } = useChat({
-    id: chatId ?? '__home__',
-    messages: initialMessages,
+    id: chatId,
+    messages: serverInitialMessages ?? [],
     onFinish: ({ messages: allMessages }) => {
-      if (!chatId) return
+      // Guests: no persistence — refresh on /chat/[id] redirects to home.
+      // Auth users: save to DB via API.
+      if (!isAuth) return
       const title = getTitleFromMessages(allMessages)
       storage.saveChat(chatId, allMessages, title)
     },
   })
 
-  // Auto-send the pending message for a brand-new guest chat.
-  // Read directly from sessionStorage inside the effect — NOT from the useMemo closure —
-  // so React StrictMode's double-invocation finds it empty on the second run.
+  // ── Login / Logout transitions ────────────────────────────────────────────
+  // Compares current isAuth against the previously recorded value to detect
+  // direction of change (login vs logout) without an extra state variable.
   useEffect(() => {
-    if (!chatId) return
-    const pending = sessionStorage.getItem(`pending_${chatId}`)
-    if (!pending) return
-    sessionStorage.removeItem(`pending_${chatId}`)
-    sendMessage({ text: pending })
-  }, [chatId]) // eslint-disable-line
+    if (authLoading) return
 
-  // Redirect guests who hit an invalid/expired chatId.
-  // Only fires when we have no pending message and no stored messages — i.e. a truly broken link.
-  // Authenticated users are handled on the server via notFound().
-  useEffect(() => {
-    if (!chatId || authLoading || isAuth || pendingMessage) return
-    const guestChat = storage.getGuestChat(chatId)
-    if (!guestChat && initialMessages.length === 0) {
+    const wasAuth = prevIsAuth.current
+    prevIsAuth.current = isAuth
+
+    // Skip the very first render — just record the initial state.
+    if (wasAuth === null) return
+
+    if (wasAuth && !isAuth) {
+      // ── Logged OUT ────────────────────────────────────────────────────────
+      // Guest can't access an auth-owned chat, so redirect home regardless
+      // of whether this is a new chat or an existing one.
       router.replace('/')
+      return
     }
-  }, [chatId, isAuth, authLoading]) // eslint-disable-line
 
-  // Scroll as messages stream in — pure DOM side-effect, useEffect is correct here
+    if (!wasAuth && isAuth) {
+      // ── Logged IN ─────────────────────────────────────────────────────────
+      // The conversation existed only in React state (useChat in-memory).
+      // Persist it to the DB now so a future refresh works correctly.
+      if (messages.length > 0) {
+        const title = getTitleFromMessages(messages)
+        storage.saveChat(chatId, messages, title)
+      }
+    }
+  }, [isAuth, authLoading]) // eslint-disable-line
+
+  // ── Auto-scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, status])
 
+  // ─── Handlers ─────────────────────────────────────────────────────────────
 
-  async function handleSend() {
+  function handleSend() {
     const text = input.trim()
     if (!text) return
     if (status !== 'ready' && status !== 'error') return
 
     setInput('')
 
-    if (!chatId) {
-      // Home page: generate a new chat ID, store the pending message, navigate
-      const newId = crypto.randomUUID()
-
-      // Always write to sessionStorage — the /chat/[id] page reads this
-      // to auto-send the first message regardless of auth state.
-      sessionStorage.setItem(`pending_${newId}`, text)
-
-      if (isAuth) {
-        // Pre-create the DB row so the server page finds it immediately,
-        // preventing the notFound() flash for authenticated users.
-        setIsCreating(true)
-        try {
-          await createChatAction(newId, text)
-        } finally {
-          setIsCreating(false)
-        }
-      }
-
-      router.push('/chat/' + newId)
-      return
+    if (!hasNavigated.current) {
+      // First message from home page:
+      // Silently update the URL without triggering any Next.js navigation
+      // or server re-render. The component stays fully alive.
+      window.history.replaceState(null, '', `/chat/${chatId}`)
+      hasNavigated.current = true
+      setShowWelcome(false)
     }
 
-    // Already in a chat: send directly
     sendMessage({ text })
   }
 
@@ -222,11 +223,6 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
   }
 
   const isStreaming = status === 'streaming' || status === 'submitted'
-
-  // Welcome screen shows only on the home page (no chatId).
-  // On a chat page, we always show the messages pane — even if messages are
-  // empty while loading, to avoid suggestion flash on refresh.
-  const showWelcome = !chatId
 
   return (
     <div className="flex h-full flex-col">
@@ -253,7 +249,6 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
             value={input}
             onChange={(e) => {
               setInput(e.target.value)
-              // Auto-grow textarea
               e.target.style.height = 'auto'
               e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'
             }}
@@ -277,13 +272,11 @@ export function ChatInterface({ chatId, serverInitialMessages }: ChatInterfacePr
             <button
               type="button"
               onClick={handleSend}
-              disabled={!input.trim() || isCreating}
+              disabled={!input.trim()}
               title="Send message"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {isCreating
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <ArrowUp className="h-4 w-4" />}
+              <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>
