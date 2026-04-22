@@ -123,7 +123,7 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const router = useRouter()
   const storage = useChatStorage()
-  const { isAuth, isLoading: authLoading } = useAuth()
+  const { user, isAuth, isLoading: authLoading } = useAuth()
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -146,7 +146,19 @@ export function ChatInterface({
     isNewChat && !serverInitialMessages?.length,
   )
 
-  const { messages, sendMessage, status, stop } = useChat({
+  const [localMessageCount, setLocalMessageCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (user?.isAnonymous) {
+      const lastAt = new Date(user.lastMessageAt)
+      const isNewDay = lastAt.toDateString() !== new Date().toDateString()
+      setLocalMessageCount(isNewDay ? 0 : user.messageCount || 0)
+    } else {
+      setLocalMessageCount(null)
+    }
+  }, [user?.isAnonymous, user?.messageCount, user?.lastMessageAt])
+
+  const { messages, sendMessage, status, stop, error } = useChat({
     id: chatId,
     messages: serverInitialMessages ?? [],
     onFinish: ({ messages: allMessages }) => {
@@ -212,6 +224,10 @@ export function ChatInterface({
       setShowWelcome(false)
     }
 
+    if (user?.isAnonymous && localMessageCount !== null) {
+      setLocalMessageCount((prev) => (prev || 0) + 1)
+    }
+
     sendMessage({ text })
   }
 
@@ -223,9 +239,29 @@ export function ChatInterface({
   }
 
   const isStreaming = status === 'streaming' || status === 'submitted'
+  const messagesLeft = user?.isAnonymous && localMessageCount !== null 
+    ? Math.max(0, 10 - localMessageCount) 
+    : null;
 
   return (
     <div className="flex h-full flex-col">
+      {/* ── Header ── */}
+      {user?.isAnonymous && (
+        <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 px-6 py-2">
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <Sparkles className="h-3 w-3" />
+            <span>Guest Messages Left: {messagesLeft} / 10</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Error Banner ── */}
+      {error && (
+        <div className="bg-destructive/10 px-4 py-2 text-center text-sm font-medium text-destructive">
+          {error.message || 'An error occurred.'}
+        </div>
+      )}
+
       {/* ── Messages ── */}
       <div className="flex-1 overflow-y-auto">
         {showWelcome ? (

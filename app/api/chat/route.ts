@@ -25,14 +25,23 @@ export async function POST(req: Request) {
       return new Response("User not found", { status: 401 })
     }
 
-    if (dbUser.isAnonymous && dbUser.messageCount >= 10) {
+    const now = new Date()
+    const isNewDay = dbUser.lastMessageAt.toDateString() !== now.toDateString()
+    const currentCount = isNewDay ? 0 : dbUser.messageCount
+
+    if (dbUser.isAnonymous && currentCount >= 10) {
       return new Response("Guest message limit reached. Please connect your wallet to continue.", {
         status: 403
       })
     }
 
-    // Increment message count
-    await db.update(user).set({ messageCount: dbUser.messageCount + 1 }).where(eq(user.id, dbUser.id))
+    // Increment message count and update timestamp
+    await db.update(user)
+      .set({ 
+        messageCount: currentCount + 1,
+        lastMessageAt: now
+      })
+      .where(eq(user.id, dbUser.id))
 
     const { messages }: { messages: UIMessage[] } = await req.json();
 

@@ -5,7 +5,7 @@ import { authClient } from "@/lib/auth-client";
 import { useWalletSignIn } from "@/hooks/use-wallet-sign-in";
 
 interface AuthContextValue {
-  user: { id: string; name: string; email: string; isAnonymous: boolean } | null;
+  user: { id: string; name: string; email: string; isAnonymous: boolean; messageCount: number; lastMessageAt: string } | null;
   isAuth: boolean;
   isLoading: boolean;
   signOut: () => Promise<void>;
@@ -41,6 +41,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: session.user.name,
         email: session.user.email,
         isAnonymous: session.user.isAnonymous || false,
+        messageCount: (session.user as any).messageCount || 0,
+        lastMessageAt: (session.user as any).lastMessageAt || new Date().toISOString(),
       }
     : null;
 

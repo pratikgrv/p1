@@ -12,6 +12,17 @@ export const auth = betterAuth({
       ...schema
     }
   }),
+  user: {
+    additionalFields: {
+      messageCount: {
+        type: "number",
+        defaultValue: 0,
+      },
+      lastMessageAt: {
+        type: "string", // Better Auth additionalFields types are limited, but it will be serialized
+      }
+    }
+  },
   plugins: [
     anonymous(),
     siws({

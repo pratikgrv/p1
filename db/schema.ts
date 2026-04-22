@@ -11,6 +11,7 @@ export const user = pgTable("user", {
   isAnonymous: boolean("is_anonymous").default(false),
   role: text("role").default("guest").notNull(),
   messageCount: integer("message_count").default(0).notNull(),
+  lastMessageAt: timestamp("last_message_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
